@@ -5,6 +5,8 @@ import Graphics.Gloss.Interface.Pure.Simulate
 import Data.Set (Set(..))
 import Data.Monoid((<>))
 import qualified Data.Set as S
+import System.Random
+
 import Lib
 
 type Square = (Int, Int)
@@ -15,10 +17,34 @@ screenSize :: Num a => a
 screenSize = 500
 
 mazeSize :: Num a => a
-mazeSize = 50
+mazeSize = 100
 
+
+initialModel :: IO Model
+initialModel = do
+  xMask <- mask 1
+  yMask <- mask 2
+  return $ S.fromList [(x, y)
+                           | x <- [0..(mazeSize - 1)]
+                           , y <- [0..(mazeSize - 1)]                         
+                           , xMask !! x == 0
+                           , yMask !! y == 0 ]
+
+mask :: Int ->  IO [Int]
+mask i = do
+  g <- getStdGen
+  return $ randomRs (0,i) g
+  
 main :: IO ()
-main = simulate (InWindow "Maze" (screenSize, screenSize) (10, 10)) white 3 initialModel draw step
+main = do
+  init <- initialModel
+  simulate
+    (InWindow "Maze" (screenSize, screenSize) (10, 10))
+    white
+    10
+    init
+    draw
+    step
 
 draw :: Model -> Picture
 draw w = foldMap f w
@@ -32,12 +58,6 @@ scaleF = screenSize / mazeSize
 
 drawSquare :: Picture
 drawSquare = let size = scaleF * 1 in translate (size/2)(size/2) $ color black $ rectangleSolid size size
-
-initialModel :: Model
-initialModel =  S.fromList [(x, y)
-                           | x <- [0..(mazeSize -1)]
-                           , y <-[0..(mazeSize -1)]                         
-                           , mod (x *2 ) 3  ==  mod y 4 ] 
 
 step :: a -> b -> Model -> Model
 step _ _ s = (newGrid s . withCounts s . interestingPoints) s
@@ -56,10 +76,12 @@ interestingPoints w =  w <> (foldMap neighbours w)
 
 neighbours :: (Int, Int) -> Set (Int,Int)
 neighbours (x,y) = S.fromList [(x',y')
-                                | x' <- [(x-1)..(x+1)]
-                                , y' <- [y-1 .. y+1]
+                                | a <- [-1..1]
+                                , b <- [-1..1]
+                                , let x' = x + a
+                                , let y' = y + b
                                 , y' >= 0
                                 , x' >= 0
                                 , y' < mazeSize
-                                , x' /= y'
+                                , a /= 0 || b /=0 
                                 , x' < mazeSize]
