@@ -1,17 +1,23 @@
 module Main where
 
-import Graphics.Gloss
-import Graphics.Gloss.Interface.Pure.Simulate
-import Data.Set (Set(..))
-import Data.Monoid ((<>))
-import qualified Data.Set as S
-import System.Random
+import           Data.List                              (partition)
+import           Data.Map                               (Map)
+import qualified Data.Map.Strict                        as M
+import           Data.Monoid                            ((<>))
+import           Data.Set                               (Set (..))
+import qualified Data.Set                               as S
+import           Graphics.Gloss
+import           Graphics.Gloss.Interface.Pure.Simulate
+import           System.Random
 
-import Lib
+
+import           Lib
+
+data Tile = Empty | Wall | Start | Finish | Water deriving (Eq, Show)
 
 type Square = (Int, Int)
 
-type Model = Set Square
+type Model = Map Square Tile
 
 screenSize
   :: Num a
@@ -28,12 +34,20 @@ initialModel = do
   xMask <- mask 1
   yMask <- mask 2
   return $
-    S.fromList
-      [ (x, y)
-      | x <- [0 .. (mazeSize - 1)]
-      , y <- [0 .. (mazeSize - 1)]
+    M.insert (1, 1) Start $
+    M.insert (mazeSize - 1, mazeSize - 1) Finish $
+    M.fromList
+      [ ((x, y), Wall)
+      | (x, y) <- allSquares
       , xMask !! x == 0
       , yMask !! y == 0 ]
+
+
+allSquares :: [(Int, Int)]
+allSquares =
+  [ (x, y)
+  | x <- [0 .. (mazeSize - 1)]
+  , y <- [0 .. (mazeSize - 1)] ]
 
 mask :: Int -> IO [Int]
 mask i = do
@@ -46,15 +60,15 @@ main = do
   simulate
     (InWindow "Maze" (screenSize, screenSize) (10, 10))
     white
-    10
+    3
     init
     draw
     step
 
 draw :: Model -> Picture
-draw w = foldMap f w
+draw w = foldMap f (M.toList w)
   where
-    f (x, y) = translate (translateToScreen x) (translateToScreen y) drawSquare
+    f ((x, y), t) = translate (translateToScreen x) (translateToScreen y) (drawTile t)
 
 translateToScreen :: Int -> Float
 translateToScreen x = scaleF * (fromIntegral x) - (screenSize / 2)
@@ -64,38 +78,55 @@ scaleF
   => a
 scaleF = screenSize / mazeSize
 
-drawSquare :: Picture
-drawSquare =
+drawTile :: Tile -> Picture
+drawTile t =
   let size = scaleF * 1
-  in translate (size / 2) (size / 2) $ color black $ rectangleSolid size size
+  in let c =
+           case t of
+             Wall -> black
+             Finish -> red
+             Start -> blue
+     in if (t == Empty)
+          then mempty
+          else translate (size / 2) (size / 2) $ color c $ rectangleSolid size size
 
 step :: a -> b -> Model -> Model
-step _ _ s = (newGrid s . withCounts s . interestingPoints) s
+step _ _ s =  M.fromList $ filter (\(_,t) -> t /= Empty) $ map (\p -> (p, nextState (lookupTile p s) (neighbours p s))) allSquares
 
-newGrid :: Model -> Set (Square, Int) -> Model
-newGrid w i = (S.map fst . S.filter f) i
+nextState :: Tile -> ([Tile],[Tile]) -> Tile
+nextState t (ss, ds) =
+  case t of
+    Empty ->
+      if nc == 3
+        then Wall
+        else Empty
+    Wall ->
+      if nc < 6 && nc > 0
+        then Wall
+        else Empty
+    x -> x
   where
-    f (_, 3) = True
-    f (p, n) = n > 0 && n < 5 && S.member p w
+    nc = length (filter (\t -> t == Wall) (ss ++ ds))
 
-withCounts :: Model -> Set Square -> Set (Square, Int)
-withCounts w = S.map f
-  where
-    f p = (p, length (S.filter (flip S.member w) (neighbours p)))
 
-interestingPoints :: Set Square -> Set Square
-interestingPoints w = w <> (foldMap neighbours w)
+lookupTile :: Square -> Model -> Tile
+lookupTile = M.findWithDefault Empty
 
-neighbours :: (Int, Int) -> Set (Int, Int)
-neighbours (x, y) =
-  S.fromList
-    [ (x', y')
-    | a <- [-1 .. 1]
-    , b <- [-1 .. 1]
-    , let x' = x + a
-    , let y' = y + b
-    , y' >= 0
-    , x' >= 0
-    , y' < mazeSize
-    , a /= 0 || b /= 0
-    , x' < mazeSize ]
+neighbours :: Square -> Model -> ([Tile], [Tile])
+neighbours (x, y) m =
+  let ds =
+        [ (a, b)
+        | a <- [-1 .. 1]
+        , b <- [-1 .. 1]
+        , a /= 0 || b /= 0 ]
+  in let f ds' =
+           [ lookupTile (x', y') m
+           | (a, b) <- ds'
+           , let x' = x + a
+           , let y' = y + b
+           , y' >= 0
+           , x' >= 0
+           , y' < mazeSize
+           , x' < mazeSize ]
+     in let (as, bs) = partition (\(a, b) -> abs (a + b) == 1) ds
+        in (f as, f bs)
